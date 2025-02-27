@@ -1,74 +1,256 @@
-import { Image, StyleSheet, Platform } from 'react-native';
+// app/(tabs)/index.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, SafeAreaView, StatusBar, TextInput } from 'react-native';
+import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { Ionicons } from '@expo/vector-icons';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+export default function MapScreen() {
+  const [location, setLocation] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [destination, setDestination] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [searchText, setSearchText] = useState('');
+  const mapRef = useRef(null);
 
-export default function HomeScreen() {
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setErrorMsg('Permission de localisation refusée');
+        return;
+      }
+
+      let location = await Location.getCurrentPositionAsync({});
+      setLocation(location);
+    })();
+  }, []);
+
+  const handleReport = (type) => {
+    if (location) {
+      const newReport = {
+        id: Date.now().toString(),
+        type,
+        coordinate: {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        }
+      };
+      setReports([...reports, newReport]);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (searchText.length > 2) {
+      try {
+        // Utiliser l'API de géocodage OpenStreetMap (totalement gratuite)
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchText)}&format=json&limit=1`,
+          {
+            headers: {
+              'User-Agent': 'WazeCloneApp/1.0'  // OSM demande un User-Agent
+            }
+          }
+        );
+        const json = await response.json();
+        
+        if (json.length > 0) {
+          const result = json[0];
+          const newDestination = {
+            latitude: parseFloat(result.lat),
+            longitude: parseFloat(result.lon),
+            name: result.display_name,
+          };
+          
+          setDestination(newDestination);
+          
+          // Animer la carte vers la nouvelle destination
+          mapRef.current?.animateToRegion({
+            latitude: newDestination.latitude,
+            longitude: newDestination.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }, 1000);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  };
+
+  const getReportIcon = (type) => {
+    switch (type) {
+      case 'accident':
+        return 'warning';
+      case 'police':
+        return 'shield';
+      case 'traffic':
+        return 'car';
+      default:
+        return 'alert-circle';
+    }
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+
+      {/* Barre de recherche */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Rechercher une destination..."
+          value={searchText}
+          onChangeText={setSearchText}
+          onSubmitEditing={handleSearch}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12'
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      </View>
+
+      {/* Carte */}
+      {location ? (
+        <MapView
+          ref={mapRef}
+          style={styles.map}
+          provider={PROVIDER_DEFAULT} // Utilise la carte par défaut (OpenStreetMap sur Android)
+          initialRegion={{
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            latitudeDelta: 0.0922,
+            longitudeDelta: 0.0421,
+          }}
+          showsUserLocation
+          showsMyLocationButton
+          // Pour utiliser OpenStreetMap, on peut ajouter la customisation suivante:
+          customMapStyle={[]}
+          urlTemplate="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          userAgentString="WazeCloneApp/1.0"
+        >
+          {destination && (
+            <Marker
+              coordinate={{
+                latitude: destination.latitude,
+                longitude: destination.longitude,
+              }}
+              title={destination.name}
+              pinColor="blue"
+            />
+          )}
+
+          {/* Affichage des signalements */}
+          {reports.map((report) => (
+            <Marker
+              key={report.id}
+              coordinate={report.coordinate}
+              title={`Signalement: ${report.type}`}
+            >
+              <View style={[styles.reportMarker, { 
+                backgroundColor: 
+                  report.type === 'accident' ? '#FF4C4C' : 
+                  report.type === 'police' ? '#4C6CFF' : '#FF8C4C' 
+              }]}>
+                <Ionicons name={getReportIcon(report.type)} size={20} color="white" />
+              </View>
+            </Marker>
+          ))}
+        </MapView>
+      ) : (
+        <View style={styles.loading}>
+          <Text>{errorMsg || 'Chargement de la carte...'}</Text>
+        </View>
+      )}
+
+      {/* Boutons de signalement */}
+      <View style={styles.reportButtons}>
+        <TouchableOpacity
+          style={[styles.reportButton, { backgroundColor: '#FF4C4C' }]}
+          onPress={() => handleReport('accident')}
+        >
+          <Ionicons name="warning" size={24} color="white" />
+          <Text style={styles.reportButtonText}>Accident</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.reportButton, { backgroundColor: '#4C6CFF' }]}
+          onPress={() => handleReport('police')}
+        >
+          <Ionicons name="shield" size={24} color="white" />
+          <Text style={styles.reportButtonText}>Police</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.reportButton, { backgroundColor: '#FF8C4C' }]}
+          onPress={() => handleReport('traffic')}
+        >
+          <Ionicons name="car" size={24} color="white" />
+          <Text style={styles.reportButtonText}>Trafic</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  map: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  searchContainer: {
     position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    zIndex: 1,
+  },
+  searchInput: {
+    height: 50,
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  reportButtons: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  reportButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    borderRadius: 50,
+    width: 80,
+    height: 80,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  reportButtonText: {
+    color: 'white',
+    marginTop: 5,
+    fontSize: 12,
+  },
+  reportMarker: {
+    padding: 5,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: 'white',
+  },
+  loading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
